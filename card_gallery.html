@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>春秋杀卡牌</title>
-        <style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
         * {
             margin: 0;
             padding: 0;
@@ -475,17 +477,15 @@
                 <span class="stat-label">卡牌类型</span>
             </div>
             <div class="stat-item">
-                <span class="stat-number" id="totalSize">0MB</span>
+                <span class="stat-number" id="totalSize">0.00 MB</span>
                 <span class="stat-label">总大小</span>
             </div>
         </div>
         <div class="action-buttons">
-            <button class="download-all-btn" onclick="downloadAllCards()">
-                📦 一键下载所有卡牌
-            </button>
-            </div>
-            </div>
-            
+            <button class="download-all-btn">一键下载所有卡牌</button>
+        </div>
+    </div>
+
     <!-- 主要内容 -->
     <div class="container">
         <!-- 加载提示 -->
@@ -495,25 +495,25 @@
             <div class="loading-progress-bar">
                 <div class="loading-progress-fill"></div>
             </div>
-            </div>
-            
+        </div>
+        
         <!-- 卡牌网格 -->
         <div class="cards-grid"></div>
         
         <div id="emptyState" class="empty-state" style="display: none;">
             <h3>暂无卡牌</h3>
             <p>Generated_Cards文件夹中还没有卡牌图片<br>请先运行卡牌生成器来创建卡牌</p>
-            </div>
-            </div>
-            
+        </div>
+    </div>
+
     <!-- 下载进度提示 -->
     <div id="downloadProgress" class="download-progress">
-        <h3>正在下载卡牌...</h3>
+        <h3>正在打包...</h3>
         <div class="progress-bar">
-            <div class="progress-fill" id="progressFill"></div>
-            </div>
-        <p id="progressText">0 / 0</p>
-            </div>
+            <div class="progress-fill"></div>
+        </div>
+        <p class="progress-text">正在准备...</p>
+    </div>
             
     <script>
         const loading = document.querySelector('.loading');
@@ -721,7 +721,7 @@
                 if (existingFileCount !== currentCardCount) {
                     console.log(`发现卡牌数量变化！从 ${currentCardCount} 变为 ${existingFileCount}。正在刷新...`);
                     fetchAndDisplayCards();
-                    } else {
+                } else {
                     console.log("没有发现新卡牌。");
                 }
             } catch(error) {
@@ -734,7 +734,7 @@
             downloadAllBtn.addEventListener('click', downloadAllCards);
             setInterval(checkForNewCards, 30000); // 每30秒检查一次
         });
-        </script>
+    </script>
 </body>
 </html>
         
