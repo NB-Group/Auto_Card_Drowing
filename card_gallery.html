@@ -196,9 +196,16 @@
             cursor: pointer;
             transform-style: preserve-3d;
             transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            opacity: 0;
+            transform: translateY(20px);
         }
 
-        .card-wrapper:hover {
+        .card-wrapper.loaded {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .card-wrapper.loaded:hover {
             transform: rotateY(8deg) rotateX(3deg) scale(1.05);
         }
 
@@ -213,6 +220,42 @@
                 0 0 0 1px rgba(255, 255, 255, 0.1);
             transition: all 0.6s ease;
             transform-style: preserve-3d;
+        }
+
+        /* 卡牌占位符 */
+        .card-placeholder {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #2a2a2a 0%, #3a3a3a 50%, #2a2a2a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 1.2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 0.8; }
+        }
+
+        .card-placeholder::before {
+            content: '📄';
+            font-size: 3rem;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .card-placeholder::after {
+            content: '加载中...';
+            position: absolute;
+            bottom: 20px;
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.4);
         }
 
         .card::before {
@@ -608,27 +651,62 @@
         }
 
         // 创建卡牌元素
-        function createCardElement(cardInfo, imageSrc) {
+        function createCardElement(cardInfo, imageSrc, delay = 0) {
             const cardWrapper = document.createElement('div');
             cardWrapper.className = 'card-wrapper';
             
+            // 先显示占位符
             cardWrapper.innerHTML = `
-                <div class="card">
-                    <img src="${imageSrc}" alt="${cardInfo.name}" loading="lazy">
-                    <div class="card-overlay">
-                        <div class="card-name">${cardInfo.name}</div>
-                        <div class="card-info">
-                            <strong>类型:</strong> ${cardInfo.group}<br>
-                            <strong>效果:</strong> ${cardInfo.description.substring(0, 50)}...
-                        </div>
+                <div class="card-placeholder">
+                    <div style="text-align: center;">
+                        <div style="font-size: 1rem; margin-top: 10px;">${cardInfo.name}</div>
                     </div>
-                    <button class="download-btn" onclick="downloadImage('${imageSrc}', '${cardInfo.name}.png')" title="下载卡牌">
-                        ⬇
-                    </button>
                 </div>
             `;
             
+            // 异步加载图片（带延迟）
+            setTimeout(() => {
+                loadCardImage(cardWrapper, cardInfo, imageSrc);
+            }, delay);
+            
             return cardWrapper;
+        }
+
+        // 异步加载卡牌图片
+        function loadCardImage(cardWrapper, cardInfo, imageSrc) {
+            const img = new Image();
+            
+            img.onload = function() {
+                // 图片加载完成后，替换占位符内容
+                cardWrapper.innerHTML = `
+                    <div class="card">
+                        <img src="${imageSrc}" alt="${cardInfo.name}">
+                        <div class="card-overlay">
+                            <div class="card-name">${cardInfo.name}</div>
+                            <div class="card-info">
+                                <strong>类型:</strong> ${cardInfo.group}<br>
+                                <strong>效果:</strong> ${cardInfo.description.substring(0, 50)}...
+                            </div>
+                        </div>
+                        <button class="download-btn" onclick="downloadImage('${imageSrc}', '${cardInfo.name}.png')" title="下载卡牌">
+                            ⬇
+                        </button>
+                    </div>
+                `;
+                
+                // 添加加载完成的动画效果
+                setTimeout(() => {
+                    cardWrapper.classList.add('loaded');
+                }, 50);
+            };
+            
+            img.onerror = function() {
+                // 图片加载失败时直接移除占位符
+                cardWrapper.remove();
+            };
+            
+            // 开始加载图片
+            img.src = imageSrc;
         }
 
         // 加载卡牌
@@ -672,9 +750,9 @@
                     // 显示卡牌
                     cardsContainer.style.display = 'grid';
                     
-                    // 创建卡牌元素
-                    existingCards.forEach(cardInfo => {
-                        const cardElement = createCardElement(cardInfo, cardInfo.imageSrc);
+                    // 创建卡牌元素（带延迟，错开加载时间）
+                    existingCards.forEach((cardInfo, index) => {
+                        const cardElement = createCardElement(cardInfo, cardInfo.imageSrc, index * 150);
                         cardsContainer.appendChild(cardElement);
                     });
                     
@@ -682,18 +760,6 @@
                     document.getElementById('totalCards').textContent = existingCards.length;
                     document.getElementById('cardTypes').textContent = cardTypes.size;
                     document.getElementById('totalSize').textContent = formatFileSize(totalSize);
-                    
-                    // 添加入场动画
-                    const cards = document.querySelectorAll('.card-wrapper');
-                    cards.forEach((card, index) => {
-                        card.style.opacity = '0';
-                        card.style.transform = 'translateY(50px)';
-                        setTimeout(() => {
-                            card.style.transition = 'all 0.6s ease';
-                            card.style.opacity = '1';
-                            card.style.transform = 'translateY(0)';
-                        }, index * 100);
-                    });
                 }
                 
             } catch (error) {
