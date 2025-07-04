@@ -198,6 +198,9 @@
             transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
+        .card-wrapper:hover {
+            transform: rotateY(8deg) rotateX(3deg) scale(1.05);
+        }
 
         .card {
             position: absolute;
@@ -330,6 +333,24 @@
             margin: 25px auto;
         }
 
+        .loading-progress-bar {
+            width: 80%;
+            max-width: 400px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 20px auto 0;
+        }
+
+        .loading-progress-fill {
+            height: 100%;
+            background: #ffffff;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -355,37 +376,6 @@
             color: rgba(255, 255, 255, 0.6);
         }
 
-        /* 卡牌骨架屏样式 */
-        .card-skeleton {
-            width: 100%;
-            height: 475px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            position: relative;
-            overflow: hidden;
-            transition: opacity 0.5s ease-out;
-        }
-
-        .card-skeleton::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-            animation: shimmer 1.8s infinite;
-        }
-
-        @keyframes shimmer {
-            0% {
-                transform: translateX(-100%);
-            }
-            100% {
-                transform: translateX(100%);
-            }
-        }
-
         /* 响应式设计 */
         @media (max-width: 768px) {
             .header h1 {
@@ -409,9 +399,6 @@
             }
             
             .card-wrapper {
-                height: 400px;
-            }
-            .card-skeleton {
                 height: 400px;
             }
         }
@@ -505,18 +492,24 @@
             
     <!-- 主要内容 -->
     <div class="container">
-        <div class="cards-grid">
-            <div class="loading">
-                <div class="spinner"></div>
+        <!-- 加载提示 -->
+        <div class="loading">
+            <div class="spinner"></div>
+            <p id="loading-text">正在加载卡牌数据...</p>
+            <div class="loading-progress-bar">
+                <div class="loading-progress-fill"></div>
             </div>
-        </div>
+            </div>
+            
+        <!-- 卡牌网格 -->
+        <div class="cards-grid"></div>
         
         <div id="emptyState" class="empty-state" style="display: none;">
             <h3>暂无卡牌</h3>
             <p>Generated_Cards文件夹中还没有卡牌图片<br>请先运行卡牌生成器来创建卡牌</p>
             </div>
-        </div>
-        
+            </div>
+            
     <!-- 下载进度提示 -->
     <div id="downloadProgress" class="download-progress">
         <h3>正在下载卡牌...</h3>
@@ -527,338 +520,225 @@
             </div>
             
     <script>
-        // 全局变量存储卡牌数据
-        let allCards = [];
+        const loading = document.querySelector('.loading');
+        const emptyState = document.querySelector('.empty-state');
+        const cardsGrid = document.querySelector('.cards-grid');
+        const downloadAllBtn = document.querySelector('.download-all-btn');
+        let currentCardCount = 0;
+        let allAvailableCards = [];
 
-        // 创建动态背景粒子
-        function createParticles() {
-            const particlesContainer = document.getElementById('particles');
-            const particleCount = 40;
+        function updateStats(cardCount, typeCount, totalSize) {
+            document.getElementById('totalCards').textContent = cardCount;
+            document.getElementById('cardTypes').textContent = typeCount;
+            document.getElementById('totalSize').textContent = `${(totalSize / (1024 * 1024)).toFixed(2)} MB`;
+        }
+
+        function createCardElement(card) {
+            const cardWrapper = document.createElement('div');
+            cardWrapper.className = 'card-wrapper';
             
-            for (let i = 0; i < particleCount; i++) {
-                const particle = document.createElement('div');
-                particle.className = 'particle';
-                particle.style.left = Math.random() * 100 + '%';
-                particle.style.top = Math.random() * 100 + '%';
-                particle.style.animationDelay = Math.random() * 8 + 's';
-                particle.style.animationDuration = (Math.random() * 4 + 6) + 's';
-                particlesContainer.appendChild(particle);
-            }
-        }
+            cardWrapper.innerHTML = `
+                <div class="card">
+                    <img src="${card.imageUrl}" alt="${card.card_name}" loading="lazy">
+                    <div class="card-overlay">
+                        <h3 class="card-name">${card.card_name} (${card.card_group})</h3>
+                        <p class="card-info">${card.description}</p>
+                    </div>
+                </div>
+                <button class="download-btn" title="下载此卡牌">
+                    <i class="fas fa-download"></i>
+                </button>
+            `;
 
-        // 获取卡牌文件名（从cards.json）
-        async function getCardNames() {
-            try {
-                const response = await fetch('cards.json');
-                const cards = await response.json();
-                return cards.map(card => ({
-                    name: card.card_name,
-                    group: card.card_group,
-                    description: card.description
-                }));
-            } catch (error) {
-                console.error('获取卡牌信息失败:', error);
-                return [];
-            }
-        }
-
-        // 检查图片是否存在
-        function checkImageExists(url) {
-            return new Promise((resolve) => {
-                const img = new Image();
-                img.onload = () => resolve(true);
-                img.onerror = () => resolve(false);
-                img.src = url;
+            cardWrapper.querySelector('.download-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                downloadCard(card.imageUrl, `${card.card_name}.png`);
             });
+
+            return cardWrapper;
         }
 
-        // 格式化文件大小
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        function downloadCard(url, filename) {
+            fetch(url)
+                .then(response => response.blob())
+                .then(blob => {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                });
         }
 
-        // 下载单张图片
-        function downloadImage(imageSrc, fileName) {
-            const link = document.createElement('a');
-            link.href = imageSrc;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        // 下载所有卡牌
         async function downloadAllCards() {
+            if (allAvailableCards.length === 0) {
+                alert('没有可供下载的卡牌。');
+                return;
+            }
+
             const progressContainer = document.querySelector('.download-progress');
             const progressFill = document.querySelector('.progress-fill');
             const progressText = document.querySelector('.progress-text');
-            const progressBar = document.querySelector('.progress-bar');
-            
+            progressContainer.style.display = 'block';
+
+            const zip = new JSZip();
+            let downloadedCount = 0;
+
+            for (const card of allAvailableCards) {
+                try {
+                    const response = await fetch(card.imageUrl);
+                    const blob = await response.blob();
+                    zip.file(`${card.card_name}.png`, blob);
+                } catch (error) {
+                    console.error(`下载卡牌失败: ${card.card_name}`, error);
+                }
+                downloadedCount++;
+                const progress = (downloadedCount / allAvailableCards.length) * 100;
+                progressFill.style.width = `${progress}%`;
+                progressText.textContent = `正在打包... (${downloadedCount}/${allAvailableCards.length})`;
+            }
+
+            progressText.textContent = '正在生成ZIP文件...';
+            zip.generateAsync({ type: "blob" })
+                .then(function(content) {
+                    saveAs(content, "春秋杀全卡牌.zip");
+                    progressContainer.style.display = 'none';
+                });
+        }
+
+        async function fetchAndDisplayCards() {
+            const loadingText = document.getElementById('loading-text');
+            const progressFill = document.querySelector('.loading-progress-fill');
+            loading.style.display = 'block';
+            emptyState.style.display = 'none';
+            cardsGrid.innerHTML = '';
+            progressFill.style.width = '0%';
+            loadingText.textContent = '正在读取卡牌配置...';
+
             try {
-                progressText.textContent = '正在准备文件...';
-                progressContainer.style.display = 'block';
+                const response = await fetch('cards.json?v=' + new Date().getTime());
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
-                const response = await fetch('cards.json');
-                const cards = await response.json();
-                
-                if (cards.length === 0) {
-                    progressText.textContent = '没有可下载的卡牌。';
-                    setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+                let allCardsConfig = await response.json();
+
+                if (allCardsConfig.length === 0) {
+                    loading.style.display = 'none';
+                    emptyState.style.display = 'block';
+                    updateStats(0, 0, 0);
                     return;
                 }
 
-                progressText.textContent = '正在压缩... (0/' + cards.length + ')';
-                progressBar.style.display = 'block';
+                loadingText.textContent = `正在检查 ${allCardsConfig.length} 张卡牌文件...`;
+                
+                const existingCards = [];
+                let checkedCount = 0;
+                
+                const cardChecks = allCardsConfig.map(card => {
+                    if (!card || !card.card_name) {
+                        console.warn('发现一个无效的卡牌项目（缺少名称）:', card);
+                        checkedCount++; // 同样需要增加计数器
+                        const progress = (checkedCount / allCardsConfig.length) * 100;
+                        progressFill.style.width = `${progress}%`;
+                        return Promise.resolve(); // 返回一个立即完成的Promise
+                    }
 
-                let loadedCount = 0;
-                const totalCount = cards.length;
-                const zip = new JSZip();
-                let totalSize = 0;
-
-                const cardPromises = cards.map(card => {
-                    if (!card.card_name) return Promise.resolve(); // 跳过无效卡牌
                     const imageUrl = `Generated_Cards/${encodeURIComponent(card.card_name)}.png`;
-                    return fetch(imageUrl)
-                        .then(response => {
-                            if (!response.ok) throw new Error(`无法获取图片: ${card.card_name}`);
-                            return response.blob();
+                    return fetch(imageUrl, { method: 'HEAD' })
+                        .then(res => {
+                            if (res.ok) {
+                                const size = parseInt(res.headers.get('Content-Length') || '0', 10);
+                                existingCards.push({ ...card, imageUrl, size });
+                            }
                         })
-                        .then(blob => {
-                            zip.file(`${card.card_name}.png`, blob);
-                            loadedCount++;
-                            totalSize += blob.size;
-                            const progress = (loadedCount / totalCount) * 100;
-                            progressFill.style.width = `${progress}%`;
-                            progressText.textContent = `正在压缩... (${loadedCount}/${totalCount}) - ${Math.round(progress)}%`;
+                        .catch(err => {
+                            // 跳过不存在或加载失败的图片
                         })
-                        .catch(error => {
-                            console.error('下载卡牌时出错:', error);
-                            // 即使有错误也更新进度，防止卡住
-                            loadedCount++;
-                            const progress = (loadedCount / totalCount) * 100;
+                        .finally(() => {
+                            checkedCount++;
+                            const progress = (checkedCount / allCardsConfig.length) * 100;
                             progressFill.style.width = `${progress}%`;
-                            progressText.textContent = `正在压缩... (${loadedCount}/${totalCount}) - ${Math.round(progress)}%`;
+                            loadingText.textContent = `正在检查卡牌... (${checkedCount}/${allCardsConfig.length})`;
                         });
                 });
 
-                await Promise.all(cardPromises);
+                await Promise.all(cardChecks);
 
-                progressText.textContent = '压缩完成! 正在生成ZIP文件...';
-                
-                const content = await zip.generateAsync({type:"blob"}, function updateCallback(metadata) {
-                    const percent = metadata.percent.toFixed(2);
-                    progressText.textContent = `正在生成ZIP文件... ${percent}%`;
+                existingCards.sort((a, b) => {
+                    const typeOrder = { '变法': 1, '锦囊': 2, '连锁': 3, '祭祀': 4 };
+                    if (typeOrder[a.card_group] !== typeOrder[b.card_group]) {
+                        return (typeOrder[a.card_group] || 99) - (typeOrder[b.card_group] || 99);
+                    }
+                    return a.card_name.localeCompare(b.card_name, 'zh-CN');
                 });
                 
-                progressText.textContent = `下载完成! 总大小: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`;
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(content);
-                link.download = "春秋杀卡牌合集.zip";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(link.href);
+                allAvailableCards = existingCards; // 更新全局可用卡牌列表
+                loading.style.display = 'none';
 
-                setTimeout(() => {
-                    progressContainer.style.display = 'none';
-                    progressFill.style.width = '0%';
-                }, 3000);
+                if (existingCards.length === 0) {
+                    emptyState.style.display = 'block';
+                    updateStats(0, 0, 0);
+                    currentCardCount = 0;
+                    return;
+                }
 
+                let totalSize = 0;
+                const cardTypes = new Set();
+                
+                existingCards.forEach(card => {
+                    cardTypes.add(card.card_group);
+                    totalSize += card.size || 0;
+                    const cardElement = createCardElement(card);
+                    cardsGrid.appendChild(cardElement);
+                });
+                
+                updateStats(existingCards.length, cardTypes.size, totalSize);
+                currentCardCount = existingCards.length;
+                
             } catch (error) {
-                console.error("下载全部卡牌时出错:", error);
-                progressText.textContent = '下载失败，请查看控制台。';
-                 setTimeout(() => {
-                    progressContainer.style.display = 'none';
-                    progressFill.style.width = '0%';
-                }, 3000);
+                console.error('加载卡牌失败:', error);
+                loading.style.display = 'none';
+                emptyState.style.display = 'block';
+                emptyState.querySelector('h3').textContent = '加载失败';
+                emptyState.querySelector('p').textContent = '无法加载 card.json 或发生网络错误。';
             }
         }
 
-        let currentCards = [];
-        let checkInterval;
-
-        // 检查新卡牌
         async function checkForNewCards() {
+            console.log("正在检查新卡牌...");
             try {
-                const response = await fetch('cards.json');
+                const response = await fetch('cards.json?v=' + new Date().getTime());
                 if (!response.ok) return;
-                const cards = await response.json();
+                const allCardsConfig = await response.json();
 
-                const newCards = cards.filter(card => card && card.card_name && !currentCards.includes(card.card_name));
+                let existingFileCount = 0;
+                const checks = allCardsConfig.map(card => 
+                    fetch(`Generated_Cards/${encodeURIComponent(card.card_name)}.png`, { method: 'HEAD' })
+                        .then(res => {
+                            if (res.ok) existingFileCount++;
+                        })
+                        .catch(() => {})
+                );
                 
-                if (newCards.length > 0) {
-                    const grid = document.querySelector('.cards-grid');
-                    newCards.forEach(card => {
-                        currentCards.push(card.card_name);
-                        const cardElement = createCardElement(card);
-                        grid.appendChild(cardElement);
-                         // 更新统计
-                        document.getElementById('totalCards').textContent = currentCards.length;
-                    });
+                await Promise.all(checks);
+
+                if (existingFileCount !== currentCardCount) {
+                    console.log(`发现卡牌数量变化！从 ${currentCardCount} 变为 ${existingFileCount}。正在刷新...`);
+                    fetchAndDisplayCards();
+                    } else {
+                    console.log("没有发现新卡牌。");
                 }
-            } catch (error) {
+            } catch(error) {
                 console.error("检查新卡牌时出错:", error);
             }
         }
 
-        // 创建卡牌元素
-        function createCardElement(cardInfo, imageSrc) {
-            const cardWrapper = document.createElement('div');
-            cardWrapper.className = 'card-wrapper';
-            
-            cardWrapper.innerHTML = `
-                <div class="card">
-                    <img src="${imageSrc}" alt="${cardInfo.name}" loading="lazy">
-                    <div class="card-overlay">
-                        <div class="card-name">${cardInfo.name}</div>
-                        <div class="card-info">
-                            <strong>类型:</strong> ${cardInfo.group}<br>
-                            <strong>效果:</strong> ${cardInfo.description.substring(0, 50)}...
-            </div>
-            </div>
-                    <button class="download-btn" onclick="downloadImage('${imageSrc}', '${cardInfo.name}.png')" title="下载卡牌">
-                        ⬇
-                    </button>
-            </div>
-            `;
-            
-            return cardWrapper;
-        }
-
-        // 加载卡牌
-        async function loadCards() {
-            const loadingElement = document.querySelector('.loading');
-            const cardsContainer = document.querySelector('.cards-grid');
-            const emptyState = document.getElementById('emptyState');
-            
-            try {
-                const response = await fetch('cards.json');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const cards = await response.json();
-                currentCards = cards.map(c => c.card_name);
-
-                const cardTypes = new Set(cards.map(c => c.card_group));
-                document.getElementById('totalCards').textContent = cards.length;
-                document.getElementById('cardTypes').textContent = cardTypes.size;
-
-                const grid = document.querySelector('.cards-grid');
-                grid.innerHTML = ''; // 清空初始的 spinner
-
-                // 1. 先创建并显示所有卡牌的骨架屏
-                cards.forEach((card, index) => {
-                    const skeleton = document.createElement('div');
-                    skeleton.className = 'card-skeleton';
-                    skeleton.id = `skeleton-${index}`;
-                    grid.appendChild(skeleton);
-                });
-
-                let loadedSize = 0;
-                const totalSizeEl = document.getElementById('totalSize');
-                totalSizeEl.textContent = '计算中...';
-
-                // 2. 逐个加载图片并替换骨架屏
-                cards.forEach((card, index) => {
-                    // 增加健壮性检查，防止card或card.name为空
-                    if (!card || !card.card_name) {
-                        console.error(`跳过索引为 ${index} 的无效卡牌数据:`, card);
-                        const skeleton = document.getElementById(`skeleton-${index}`);
-                        if (skeleton) {
-                            skeleton.innerHTML = '<div style="text-align:center; padding-top: 50%; color: #888;">无效卡牌数据</div>';
-                        }
-                        return; // 跳过当前循环
-                    }
-
-                    const img = new Image();
-                    const imageUrl = `Generated_Cards/${encodeURIComponent(card.card_name)}.png?t=${new Date().getTime()}`;
-                    img.src = imageUrl;
-
-                    img.onload = () => {
-                        fetch(imageUrl)
-                            .then(res => res.blob())
-                            .then(blob => {
-                                loadedSize += blob.size;
-                                totalSizeEl.textContent = (loadedSize / (1024 * 1024)).toFixed(2) + ' MB';
-                                
-                                const cardElement = createCardElement(card);
-                                const skeleton = document.getElementById(`skeleton-${index}`);
-
-                                if (skeleton) {
-                                    // 平滑替换
-                                    cardElement.style.opacity = '0';
-                                    grid.replaceChild(cardElement, skeleton);
-                                    requestAnimationFrame(() => {
-                                        cardElement.style.transition = 'opacity 0.5s ease';
-                                        cardElement.style.opacity = '1';
-                                    });
-                                }
-                            });
-                    };
-
-                    img.onerror = () => {
-                        console.error(`无法加载卡牌图片: ${card.card_name}`);
-                        const skeleton = document.getElementById(`skeleton-${index}`);
-                        if (skeleton) {
-                            skeleton.innerHTML = '<div style="text-align:center; padding-top: 50%; color: #888;">图片加载失败</div>';
-                        }
-                    };
-                });
-
-            } catch (error) {
-                console.error('加载卡牌数据时出错:', error);
-                const grid = document.querySelector('.cards-grid');
-                grid.innerHTML = `
-                    <div class="empty-state">
-                        <h3>未能加载卡牌数据</h3>
-                        <p>请检查 'cards.json' 文件是否存在，或查看控制台获取详细错误信息。</p>
-                    </div>`;
-            }
-        }
-
-        // 创建卡牌元素的函数
-        function createCardElement(card) {
-            const cardWrapper = document.createElement('div');
-            cardWrapper.className = 'card-wrapper';
-
-            cardWrapper.innerHTML = `
-                <div class="card">
-                    <img src="Generated_Cards/${encodeURIComponent(card.card_name)}.png" alt="${card.card_name}">
-                    <div class="card-overlay">
-                        <h3 class="card-name">${card.card_name}</h3>
-                        <p class="card-info">类型: ${card.card_group}</p>
-                    </div>
-                </div>
-                <button class="download-btn" title="下载此卡牌" onclick="event.stopPropagation(); downloadCard('${card.card_name}')">
-                    <i class="fas fa-download"></i>
-                </button>
-            `;
-            return cardWrapper;
-        }
-
-        // 下载单张卡牌
-        function downloadCard(cardName) {
-            const imageUrl = `Generated_Cards/${encodeURIComponent(cardName)}.png`;
-            const link = document.createElement('a');
-            link.href = imageUrl;
-            link.download = `${cardName}.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', function() {
-            createParticles();
-            loadCards();
-            // 每30秒检查一次新卡牌
-            checkInterval = setInterval(checkForNewCards, 30000);
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchAndDisplayCards();
+            downloadAllBtn.addEventListener('click', downloadAllCards);
+            setInterval(checkForNewCards, 30000); // 每30秒检查一次
         });
-    </script>
+        </script>
 </body>
 </html>
         
