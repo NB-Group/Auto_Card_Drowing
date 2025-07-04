@@ -6,6 +6,7 @@
     <title>春秋杀卡牌</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -198,6 +199,13 @@
             cursor: pointer;
             transform-style: preserve-3d;
             transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            opacity: 0;
+            transform: translateY(30px);
+        }
+        
+        .card-wrapper.visible {
+            opacity: 1;
+            transform: translateY(0);
         }
 
         .card {
@@ -375,20 +383,60 @@
         }
 
         /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .cards-grid {
+                grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+                gap: 25px;
+            }
+        }
+
         @media (max-width: 768px) {
+            .header {
+                padding: 30px 15px;
+            }
+
             .header h1 {
-                font-size: 2.8rem;
+                font-size: 2.2rem;
                 letter-spacing: 2px;
+                margin-bottom: 10px;
+            }
+
+            .header p {
+                font-size: 1.1rem;
+                margin-bottom: 25px;
             }
             
             .stats {
                 flex-direction: column;
                 align-items: center;
-                gap: 20px;
+                gap: 15px;
+                margin-top: 20px;
             }
             
             .stat-item {
-                min-width: 200px;
+                min-width: 120px;
+                padding: 20px 25px;
+            }
+
+            .stat-number {
+                font-size: 2rem;
+            }
+
+            .stat-label {
+                font-size: 0.8rem;
+            }
+
+            .action-buttons {
+                margin-top: 20px;
+            }
+
+            .download-all-btn {
+                padding: 12px 25px;
+                font-size: 1rem;
+            }
+
+            .container {
+                padding: 20px 15px;
             }
             
             .cards-grid {
@@ -397,7 +445,180 @@
             }
             
             .card-wrapper {
-                height: 400px;
+                height: 600px; /* 移动端高度600px */
+            }
+
+            .card-overlay {
+                padding: 20px;
+            }
+
+            .card-name {
+                font-size: 1.2rem;
+                margin-bottom: 8px;
+            }
+
+            .card-info {
+                font-size: 0.85rem;
+            }
+
+            .download-btn {
+                width: 45px;
+                height: 45px;
+                font-size: 1.1rem;
+                top: 10px;
+                right: 10px;
+            }
+
+            .loading {
+                padding: 60px 15px;
+            }
+
+            .loading p {
+                font-size: 1.3rem;
+            }
+
+            .loading-progress-bar {
+                width: 90%;
+                margin: 15px auto 0;
+            }
+
+            .empty-state {
+                padding: 80px 15px;
+            }
+
+            .empty-state h3 {
+                font-size: 2rem;
+            }
+
+            .empty-state p {
+                font-size: 1.1rem;
+            }
+
+            .download-progress {
+                margin: 0 15px;
+                padding: 25px 30px;
+                max-width: calc(100vw - 30px);
+            }
+
+            .progress-bar {
+                width: 100%;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.8rem;
+                letter-spacing: 1px;
+            }
+
+            .header p {
+                font-size: 1rem;
+            }
+
+            .stat-item {
+                min-width: 100px;
+                padding: 15px 20px;
+            }
+
+            .stat-number {
+                font-size: 1.8rem;
+            }
+
+            .download-all-btn {
+                padding: 10px 20px;
+                font-size: 0.9rem;
+            }
+
+            .cards-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .card-wrapper {
+                height: 600px; /* 小屏手机也保持600px */
+                max-width: 100%;
+            }
+
+            .card-overlay {
+                padding: 15px;
+            }
+
+            .card-name {
+                font-size: 1.1rem;
+            }
+
+            .card-info {
+                font-size: 0.8rem;
+                line-height: 1.4;
+            }
+
+            .download-btn {
+                width: 40px;
+                height: 40px;
+                font-size: 1rem;
+            }
+
+            .loading {
+                padding: 40px 10px;
+            }
+
+            .loading p {
+                font-size: 1.2rem;
+            }
+
+            .empty-state h3 {
+                font-size: 1.6rem;
+            }
+
+            .download-progress {
+                margin: 0 10px;
+                padding: 20px 25px;
+                max-width: calc(100vw - 20px);
+            }
+
+            .download-progress h3 {
+                font-size: 1.1rem;
+            }
+        }
+
+        @media (max-width: 320px) {
+            .header {
+                padding: 20px 10px;
+            }
+
+            .header h1 {
+                font-size: 1.6rem;
+            }
+
+            .stat-item {
+                min-width: 90px;
+                padding: 12px 15px;
+            }
+
+            .stat-number {
+                font-size: 1.6rem;
+            }
+
+            .stat-label {
+                font-size: 0.7rem;
+            }
+
+            .container {
+                padding: 15px 10px;
+            }
+
+            .cards-grid {
+                gap: 12px;
+            }
+
+            .card-wrapper {
+                height: 600px; /* 最小屏幕也保持600px */
+            }
+
+            .download-progress {
+                margin: 0 5px;
+                padding: 15px 20px;
+                max-width: calc(100vw - 10px);
             }
         }
 
@@ -483,9 +704,9 @@
         </div>
         <div class="action-buttons">
             <button class="download-all-btn">一键下载所有卡牌</button>
-        </div>
-    </div>
-
+            </div>
+            </div>
+            
     <!-- 主要内容 -->
     <div class="container">
         <!-- 加载提示 -->
@@ -495,25 +716,25 @@
             <div class="loading-progress-bar">
                 <div class="loading-progress-fill"></div>
             </div>
-        </div>
-        
+            </div>
+            
         <!-- 卡牌网格 -->
         <div class="cards-grid"></div>
         
         <div id="emptyState" class="empty-state" style="display: none;">
             <h3>暂无卡牌</h3>
             <p>Generated_Cards文件夹中还没有卡牌图片<br>请先运行卡牌生成器来创建卡牌</p>
-        </div>
-    </div>
-
+            </div>
+            </div>
+            
     <!-- 下载进度提示 -->
     <div id="downloadProgress" class="download-progress">
         <h3>正在打包...</h3>
         <div class="progress-bar">
             <div class="progress-fill"></div>
-        </div>
+            </div>
         <p class="progress-text">正在准备...</p>
-    </div>
+            </div>
             
     <script>
         const loading = document.querySelector('.loading');
@@ -539,8 +760,8 @@
                     <div class="card-overlay">
                         <h3 class="card-name">${card.card_name} (${card.card_group})</h3>
                         <p class="card-info">${card.description}</p>
-                    </div>
-                </div>
+            </div>
+            </div>
                 <button class="download-btn" title="下载此卡牌">
                     <i class="fas fa-download"></i>
                 </button>
@@ -690,6 +911,45 @@
                 
                 updateStats(existingCards.length, cardTypes.size, totalSize);
                 currentCardCount = existingCards.length;
+
+                // 使用 Intersection Observer 实现行级懒加载动画
+                const cardElements = document.querySelectorAll('.card-wrapper');
+                const rows = new Map();
+
+                // 1. 根据垂直位置对卡牌进行分组
+                cardElements.forEach(card => {
+                    const top = card.offsetTop;
+                    if (!rows.has(top)) {
+                        rows.set(top, []);
+                    }
+                    rows.get(top).push(card);
+                });
+
+                // 2. 创建一个观察者
+                const observer = new IntersectionObserver((entries, observer) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const rowTop = entry.target.offsetTop;
+                            const rowCards = rows.get(rowTop);
+
+                            // 3. 当行可见时，为行内卡牌添加带延迟的动画
+                            if (rowCards) {
+                                rowCards.forEach((card, index) => {
+                                    card.style.transitionDelay = `${index * 100}ms`;
+                                    card.classList.add('visible');
+                                });
+                            }
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.1 });
+
+                // 4. 只观察每一行的第一张卡牌
+                rows.forEach(rowCards => {
+                    if (rowCards.length > 0) {
+                        observer.observe(rowCards[0]);
+                    }
+                });
                 
             } catch (error) {
                 console.error('加载卡牌失败:', error);
@@ -721,7 +981,7 @@
                 if (existingFileCount !== currentCardCount) {
                     console.log(`发现卡牌数量变化！从 ${currentCardCount} 变为 ${existingFileCount}。正在刷新...`);
                     fetchAndDisplayCards();
-                } else {
+                    } else {
                     console.log("没有发现新卡牌。");
                 }
             } catch(error) {
@@ -734,7 +994,7 @@
             downloadAllBtn.addEventListener('click', downloadAllCards);
             setInterval(checkForNewCards, 30000); // 每30秒检查一次
         });
-    </script>
+        </script>
 </body>
 </html>
         
