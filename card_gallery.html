@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>春秋杀卡牌</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 50%, #404040 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* 简化背景 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(255, 255, 255, 0.01) 2px,
+                    rgba(255, 255, 255, 0.01) 4px
+                );
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* 动态背景粒子效果 - 简化为白色 */
+        .background-particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .particle {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            animation: float 8s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); opacity: 0.3; }
+            50% { transform: translateY(-30px) rotate(180deg); opacity: 0.1; }
+        }
+
+        /* 头部标题 - 黑白设计 */
+        .header {
+            text-align: center;
+            padding: 50px 20px;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        }
+
+        .header h1 {
+            font-size: 4rem;
+            color: #ffffff;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            margin-bottom: 15px;
+            font-weight: 300;
+            letter-spacing: 4px;
+        }
+
+        .header p {
+            font-size: 1.4rem;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+
+        /* 统计信息 - 扁平化设计 */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 25px 35px;
+            border-radius: 8px;
+            min-width: 140px;
+            text-align: center;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #2c3e50;
+            display: block;
+            line-height: 1.2;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* 功能按钮区域 */
+        .action-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .download-all-btn {
+            background: #2c3e50;
+            color: #ffffff;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 6px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .download-all-btn:hover {
+            background: #34495e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .download-all-btn:active {
+            transform: translateY(0);
+        }
+
+        /* 卡牌容器 */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 30px;
+            perspective: 1000px;
+        }
+
+        /* 3D卡牌样式 - 简化设计 */
+        .card-wrapper {
+            position: relative;
+            width: 100%;
+            height: 475px;
+            cursor: pointer;
+            transform-style: preserve-3d;
+            transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .card-wrapper:hover {
+            transform: rotateY(8deg) rotateX(3deg) scale(1.05);
+        }
+
+        .card {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 
+                0 20px 40px rgba(0, 0, 0, 0.3),
+                0 0 0 1px rgba(255, 255, 255, 0.1);
+            transition: all 0.6s ease;
+            transform-style: preserve-3d;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.6s ease;
+            z-index: 2;
+        }
+
+        .card-wrapper:hover .card::before {
+            opacity: 1;
+            animation: shine 2s ease-in-out;
+        }
+
+        @keyframes shine {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+
+        .card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 12px;
+            transition: transform 0.6s ease;
+        }
+
+        .card-wrapper:hover img {
+            transform: scale(1.08);
+        }
+
+        /* 卡牌信息覆盖层 - 黑白设计 */
+        .card-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
+            color: #ffffff;
+            padding: 25px;
+            transform: translateY(100%);
+            transition: transform 0.6s ease;
+            z-index: 3;
+        }
+
+        .card-wrapper:hover .card-overlay {
+            transform: translateY(0);
+        }
+
+        .card-name {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #ffffff;
+        }
+
+        .card-info {
+            font-size: 0.95rem;
+            opacity: 0.9;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* 下载按钮 - 简化设计 */
+        .download-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            color: #ffffff;
+            opacity: 0;
+            transform: scale(0);
+            transition: all 0.3s ease;
+            z-index: 4;
+        }
+
+        .card-wrapper:hover .download-btn {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .download-btn:hover {
+            background: rgba(255, 255, 255, 0.9);
+            color: #000000;
+            transform: scale(1.1);
+        }
+
+        /* 加载动画 - 简化设计 */
+        .loading {
+            text-align: center;
+            padding: 80px 20px;
+            color: #ffffff;
+            font-size: 1.6rem;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #ffffff;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1.2s linear infinite;
+            margin: 25px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 空状态 - 简化设计 */
+        .empty-state {
+            text-align: center;
+            padding: 100px 20px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .empty-state h3 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            color: #ffffff;
+            font-weight: 300;
+        }
+
+        .empty-state p {
+            font-size: 1.2rem;
+            line-height: 1.8;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2.8rem;
+                letter-spacing: 2px;
+            }
+            
+            .stats {
+                flex-direction: column;
+                align-items: center;
+                gap: 20px;
+            }
+            
+            .stat-item {
+                min-width: 200px;
+            }
+            
+            .cards-grid {
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                gap: 20px;
+            }
+            
+            .card-wrapper {
+                height: 400px;
+            }
+        }
+
+        /* 滚动条样式 - 简化设计 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* 下载进度提示 */
+        .download-progress {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: #ffffff;
+            padding: 30px 40px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10000;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            display: none;
+        }
+
+        .download-progress h3 {
+            margin-bottom: 15px;
+            color: #ffffff;
+            font-weight: 600;
+        }
+
+        .progress-bar {
+            width: 300px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #ffffff;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <!-- 动态背景粒子 -->
+    <div class="background-particles" id="particles"></div>
+
+    <!-- 头部 -->
+    <div class="header">
+        <h1>春秋杀卡牌</h1>
+        <div class="stats">
+            <div class="stat-item">
+                <span class="stat-number" id="totalCards">0</span>
+                <span class="stat-label">总卡牌数</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number" id="cardTypes">0</span>
+                <span class="stat-label">卡牌类型</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number" id="totalSize">0MB</span>
+                <span class="stat-label">总大小</span>
+            </div>
+        </div>
+        <div class="action-buttons">
+            <button class="download-all-btn" onclick="downloadAllCards()">
+                📦 一键下载所有卡牌
+            </button>
+        </div>
+    </div>
+
+    <!-- 主要内容 -->
+    <div class="container">
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>正在加载卡牌...</p>
+        </div>
+        
+        <div id="cardsContainer" class="cards-grid" style="display: none;"></div>
+        
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <h3>暂无卡牌</h3>
+            <p>Generated_Cards文件夹中还没有卡牌图片<br>请先运行卡牌生成器来创建卡牌</p>
+        </div>
+    </div>
+
+    <!-- 下载进度提示 -->
+    <div id="downloadProgress" class="download-progress">
+        <h3>正在下载卡牌...</h3>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p id="progressText">0 / 0</p>
+    </div>
+
+    <script>
+        // 全局变量存储卡牌数据
+        let allCards = [];
+
+        // 创建动态背景粒子
+        function createParticles() {
+            const particlesContainer = document.getElementById('particles');
+            const particleCount = 40;
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 8 + 's';
+                particle.style.animationDuration = (Math.random() * 4 + 6) + 's';
+                particlesContainer.appendChild(particle);
+            }
+        }
+
+        // 获取卡牌文件名（从cards.json）
+        async function getCardNames() {
+            try {
+                const response = await fetch('cards.json');
+                const cards = await response.json();
+                return cards.map(card => ({
+                    name: card.card_name,
+                    group: card.card_group,
+                    description: card.description
+                }));
+            } catch (error) {
+                console.error('获取卡牌信息失败:', error);
+                return [];
+            }
+        }
+
+        // 检查图片是否存在
+        function checkImageExists(url) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(false);
+                img.src = url;
+            });
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 下载单张图片
+        function downloadImage(imageSrc, fileName) {
+            const link = document.createElement('a');
+            link.href = imageSrc;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 下载所有卡牌
+        async function downloadAllCards() {
+            if (allCards.length === 0) {
+                alert('没有可下载的卡牌！');
+                return;
+            }
+
+            const progressDiv = document.getElementById('downloadProgress');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            
+            progressDiv.style.display = 'block';
+            progressText.textContent = `0 / ${allCards.length}`;
+            
+            let downloadedCount = 0;
+            
+            for (let i = 0; i < allCards.length; i++) {
+                const card = allCards[i];
+                
+                try {
+                    // 下载图片
+                    downloadImage(card.imageSrc, `${card.name}.png`);
+                    
+                    downloadedCount++;
+                    const progress = (downloadedCount / allCards.length) * 100;
+                    
+                    progressFill.style.width = progress + '%';
+                    progressText.textContent = `${downloadedCount} / ${allCards.length}`;
+                    
+                    // 添加延迟避免浏览器阻止多个下载
+                    if (i < allCards.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                } catch (error) {
+                    console.error(`下载 ${card.name} 失败:`, error);
+                }
+            }
+            
+            // 完成后隐藏进度条
+            setTimeout(() => {
+                progressDiv.style.display = 'none';
+                alert(`成功下载 ${downloadedCount} 张卡牌！`);
+            }, 1000);
+        }
+
+        // 创建卡牌元素
+        function createCardElement(cardInfo, imageSrc) {
+            const cardWrapper = document.createElement('div');
+            cardWrapper.className = 'card-wrapper';
+            
+            cardWrapper.innerHTML = `
+                <div class="card">
+                    <img src="${imageSrc}" alt="${cardInfo.name}" loading="lazy">
+                    <div class="card-overlay">
+                        <div class="card-name">${cardInfo.name}</div>
+                        <div class="card-info">
+                            <strong>类型:</strong> ${cardInfo.group}<br>
+                            <strong>效果:</strong> ${cardInfo.description.substring(0, 50)}...
+                        </div>
+                    </div>
+                    <button class="download-btn" onclick="downloadImage('${imageSrc}', '${cardInfo.name}.png')" title="下载卡牌">
+                        ⬇
+                    </button>
+                </div>
+            `;
+            
+            return cardWrapper;
+        }
+
+        // 加载卡牌
+        async function loadCards() {
+            const loadingElement = document.getElementById('loading');
+            const cardsContainer = document.getElementById('cardsContainer');
+            const emptyState = document.getElementById('emptyState');
+            
+            try {
+                // 获取卡牌信息
+                const cardNames = await getCardNames();
+                const existingCards = [];
+                let totalSize = 0;
+                const cardTypes = new Set();
+                
+                // 检查每张卡牌图片是否存在
+                for (const cardInfo of cardNames) {
+                    const imagePath = `Generated_Cards/${cardInfo.name}.png`;
+                    const exists = await checkImageExists(imagePath);
+                    
+                    if (exists) {
+                        existingCards.push({
+                            ...cardInfo,
+                            imageSrc: imagePath
+                        });
+                        cardTypes.add(cardInfo.group);
+                        totalSize += 1100000; // 估算每张卡牌约1.1MB
+                    }
+                }
+                
+                // 存储到全局变量
+                allCards = existingCards;
+                
+                // 隐藏加载动画
+                loadingElement.style.display = 'none';
+                
+                if (existingCards.length === 0) {
+                    // 显示空状态
+                    emptyState.style.display = 'block';
+                } else {
+                    // 显示卡牌
+                    cardsContainer.style.display = 'grid';
+                    
+                    // 创建卡牌元素
+                    existingCards.forEach(cardInfo => {
+                        const cardElement = createCardElement(cardInfo, cardInfo.imageSrc);
+                        cardsContainer.appendChild(cardElement);
+                    });
+                    
+                    // 更新统计信息
+                    document.getElementById('totalCards').textContent = existingCards.length;
+                    document.getElementById('cardTypes').textContent = cardTypes.size;
+                    document.getElementById('totalSize').textContent = formatFileSize(totalSize);
+                    
+                    // 添加入场动画
+                    const cards = document.querySelectorAll('.card-wrapper');
+                    cards.forEach((card, index) => {
+                        card.style.opacity = '0';
+                        card.style.transform = 'translateY(50px)';
+                        setTimeout(() => {
+                            card.style.transition = 'all 0.6s ease';
+                            card.style.opacity = '1';
+                            card.style.transform = 'translateY(0)';
+                        }, index * 100);
+                    });
+                }
+                
+            } catch (error) {
+                console.error('加载卡牌失败:', error);
+                loadingElement.innerHTML = '<p>加载失败，请刷新页面重试</p>';
+            }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            createParticles();
+            loadCards();
+        });
+
+        // 定期检查新卡牌（每30秒）
+        setInterval(() => {
+            // 静默检查是否有新卡牌，如果有则提示用户刷新
+            const currentCardCount = document.querySelectorAll('.card-wrapper').length;
+            getCardNames().then(async (cardNames) => {
+                let existingCount = 0;
+                for (const cardInfo of cardNames) {
+                    const imagePath = `Generated_Cards/${cardInfo.name}.png`;
+                    const exists = await checkImageExists(imagePath);
+                    if (exists) existingCount++;
+                }
+                
+                if (existingCount > currentCardCount) {
+                    // 显示新卡牌提示
+                    if (!document.getElementById('newCardNotice')) {
+                        const notice = document.createElement('div');
+                        notice.id = 'newCardNotice';
+                        notice.style.cssText = `
+                            position: fixed;
+                            top: 20px;
+                            right: 20px;
+                            background: linear-gradient(145deg, rgba(139, 69, 19, 0.95), rgba(160, 82, 45, 0.95));
+                            color: #F5DEB3;
+                            padding: 20px 25px;
+                            border-radius: 15px;
+                            border: 2px solid #DAA520;
+                            z-index: 1000;
+                            cursor: pointer;
+                            animation: slideIn 0.5s ease;
+                            box-shadow: 0 8px 20px rgba(139, 69, 19, 0.4);
+                        `;
+                        notice.innerHTML = `
+                            <strong>🎉 发现新卡牌！</strong><br>
+                            <small>点击刷新页面查看</small>
+                        `;
+                        notice.onclick = () => location.reload();
+                        document.body.appendChild(notice);
+                    }
+                }
+            });
+        }, 30000);
+    </script>
+</body>
+</html>

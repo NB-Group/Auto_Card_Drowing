@@ -234,7 +234,7 @@ class CardGenerator:
                     ColorLogger.info("未检测到生成指示器，继续等待...")
                 
                 # 等待生成完成 - 生成指示器消失
-                max_wait_time = 120  # 最多等待2分钟
+                max_wait_time = 1000  # 最多等待2分钟
                 wait_interval = 2
                 waited_time = 0
                 
@@ -378,40 +378,34 @@ class CardGenerator:
 
             ColorLogger.compose("处理AI图片尺寸...")
             
-            # AI图片处理：两步缩放 - 先缩小40px，再精确定位
-            # 第一步：缩小40px（等比例）
+            # AI图片处理：进一步缩小尺寸，避免图片过大
             original_width, original_height = ai_image.size
-            first_target_width = original_width - 40
-            first_target_height = original_height - 40
-            ai_image_first_scale = ai_image.resize((first_target_width, first_target_height), Image.Resampling.LANCZOS)
-              
-            # 第二步：适应卡牌大小，去除左右多余像素
-            available_width = bg_width - 6  # 左右各留3px
-            if first_target_width > available_width:
-                scale = available_width / first_target_width
-                second_target_width = available_width
-                second_target_height = int(first_target_height * scale)
-                ai_image_second_scale = ai_image_first_scale.resize((second_target_width, second_target_height), Image.Resampling.LANCZOS)
-            else:
-                ai_image_second_scale = ai_image_first_scale
-                second_target_width = first_target_width
-                second_target_height = first_target_height
-              
-            # 第三步：再缩小10%
-            final_target_width = int(second_target_width * 0.9)
-            final_target_height = int(second_target_height * 0.9)
-            ai_image_resized = ai_image_second_scale.resize((final_target_width, final_target_height), Image.Resampling.LANCZOS)
             
-            # 第四步：左右各削掉5px
-            crop_width = final_target_width - 10  # 左右各去5px
-            crop_left = 5
-            ai_image_cropped = ai_image_resized.crop((crop_left, 0, crop_left + crop_width, final_target_height))
+            # 计算合适的尺寸：适应卡牌宽度，左侧收窄3px
+            available_width = bg_width - 85  # 左边距44px，右边距41px
+            
+            if original_width > available_width:
+                # 需要缩放以适应宽度
+                scale = available_width / original_width
+                final_target_width = available_width
+                final_target_height = int(original_height * scale)
+                ai_image_resized = ai_image.resize((final_target_width, final_target_height), Image.Resampling.LANCZOS)
+                crop_width = final_target_width
+            else:
+                # 原图已经够小，缩小更多
+                final_target_width = int(original_width * 0.75)  # 缩小到75%
+                final_target_height = int(original_height * 0.75)
+                ai_image_resized = ai_image.resize((final_target_width, final_target_height), Image.Resampling.LANCZOS)
+                crop_width = final_target_width
+            
+            # 无需额外裁剪，直接使用处理后的图片
+            ai_image_cropped = ai_image_resized
             
             # 添加轻微高斯模糊
             ai_image_blurred = ai_image_cropped.filter(ImageFilter.GaussianBlur(radius=0.8))
               
-            # 居中定位（准备渐变粘贴）
-            ai_x = (bg_width - crop_width) // 2
+            # 向右偏移定位（准备渐变粘贴）
+            ai_x = (bg_width - crop_width) // 2 + 3  # 向右偏移3px
             ai_y = title_y + title_height + 20
             # 注意：AI图片不在这里直接粘贴，而是通过下面的渐变融合方式
 
@@ -510,73 +504,76 @@ class CardGenerator:
             card_group = card_data.get('card_group', '')
             emoji = card_type_emojis.get(card_group, '')
             
-            # 根据卡牌主题色确定emoji颜色
+            # 根据卡牌主题色确定emoji颜色（使用更和谐的颜色）
             color_theme = card_data.get('color_theme', '')
-            emoji_color = 'white'  # 默认白色
             
-            # 根据主题色设置深色调emoji颜色
+            # 使用更温和、更协调的颜色方案
             if '黑金' in color_theme or '墨' in color_theme:
-                emoji_color = '#D4AF37'  # 深金色
+                emoji_color = '#FFD700'  # 亮金色
             elif '深红' in color_theme or '红' in color_theme:
-                emoji_color = '#8B0000'  # 深红色
+                emoji_color = '#DC143C'  # 猩红色
             elif '蓝' in color_theme:
-                emoji_color = '#000080'  # 深蓝色
+                emoji_color = '#4169E1'  # 皇家蓝
             elif '银' in color_theme or '灰' in color_theme:
-                emoji_color = '#696969'  # 深灰色
+                emoji_color = '#C0C0C0'  # 银色
             elif '紫' in color_theme:
-                emoji_color = '#4B0082'  # 深紫色
+                emoji_color = '#9370DB'  # 中紫色
             elif '绿' in color_theme:
-                emoji_color = '#006400'  # 深绿色
+                emoji_color = '#32CD32'  # 柠檬绿
             elif '橙' in color_theme:
-                emoji_color = '#FF4500'  # 深橙色
+                emoji_color = '#FF8C00'  # 暗橙色
             elif '古铜' in color_theme or '褐' in color_theme:
-                emoji_color = '#8B4513'  # 深棕色
+                emoji_color = '#CD853F'  # 秘鲁色
             elif '青' in color_theme:
-                emoji_color = '#008B8B'  # 深青色
+                emoji_color = '#40E0D0'  # 绿松石色
             elif '黄' in color_theme:
-                emoji_color = '#DAA520'  # 深金黄色
+                emoji_color = '#FFD700'  # 金色
             else:
-                emoji_color = '#8B4513'  # 默认深棕色
+                emoji_color = '#F0E68C'  # 卡其色（温和的默认色）
             
-            # 卡牌名称完全居中title的实际内容区域
+            # 卡牌名称和图标布局优化
             card_name = card_data.get('card_name', '')
             
-            # 基于title实际内容区域居中
+            # 基于title实际内容区域的中心点
             title_content_center_x = title_x + title_content_bbox[0] + title_content_width // 2
             title_content_center_y = title_y + title_content_bbox[1] + title_content_height // 2
             
-            # 先绘制卡牌名称
+            # 计算文字尺寸
             name_bbox = draw.textbbox((0, 0), card_name, font=font_title)
             name_width = name_bbox[2] - name_bbox[0]
             name_height = name_bbox[3] - name_bbox[1]
             
-            # 如果有emoji，需要计算总宽度
+            # 文字完全居中
+            name_x = title_content_center_x - name_width // 2
+            name_y = title_content_center_y - name_height // 2
+            
+            # 绘制卡牌名称（先绘制文字）
+            draw.text((name_x, name_y), card_name, fill='white', font=font_title)
+            
+            # 如果有emoji，在文字右边绘制
             if emoji:
                 emoji_bbox = draw.textbbox((0, 0), emoji, font=font_emoji)
                 emoji_width = emoji_bbox[2] - emoji_bbox[0]
                 emoji_height = emoji_bbox[3] - emoji_bbox[1]
-                total_width = name_width + emoji_width + 10  # 名称+间距+emoji
                 
-                # 居中计算起始位置
-                start_x = title_content_center_x - total_width // 2
-                name_y = title_content_center_y - name_height // 2
+                # emoji位置：文字右边 + 间距
+                emoji_spacing = 15  # 增加间距避免重叠
+                emoji_x = name_x + name_width + emoji_spacing
                 
-                # 绘制卡牌名称
-                draw.text((start_x, name_y), card_name, fill='white', font=font_title)
+                # emoji垂直居中对齐（手动添加偏移量调整居中）
+                emoji_y_offset = 10  # 手动偏移量，向下调整17像素
+                emoji_y = title_content_center_y - emoji_height // 2 + emoji_y_offset
                 
-                # 绘制emoji（与文字基线对齐，使用主题色）
-                emoji_x = start_x + name_width + 10
-                # 计算emoji的垂直对齐位置，让它与文字基线对齐
-                emoji_y = name_y + (name_height - emoji_height) // 2
+                # 绘制emoji
                 draw.text((emoji_x, emoji_y), emoji, fill=emoji_color, font=font_emoji)
                 
                 ColorLogger.compose(f"添加卡牌标题: {card_name} {emoji} (颜色: {emoji_color})")
+                ColorLogger.compose(f"布局 - 文字位置: ({name_x}, {name_y}), emoji位置: ({emoji_x}, {emoji_y}) [向下偏移: {emoji_y_offset}px]")
+                ColorLogger.compose(f"主图位置: ai_x={ai_x} (右偏移3px), 边距: 左44px右41px")
             else:
-                # 没有emoji，直接居中卡牌名称
-                name_x = title_content_center_x - name_width // 2
-                name_y = title_content_center_y - name_height // 2
-                draw.text((name_x, name_y), card_name, fill='white', font=font_title)
                 ColorLogger.compose(f"添加卡牌标题: {card_name}")
+                ColorLogger.compose(f"布局 - 文字位置: ({name_x}, {name_y})")
+                ColorLogger.compose(f"主图位置: ai_x={ai_x} (右偏移3px), 边距: 左44px右41px")
             
             # --- 优化底栏描述文字布局 ---
             description = card_data.get('description', '')
@@ -587,43 +584,42 @@ class CardGenerator:
             
             ColorLogger.compose(f"底栏可用宽度: {available_text_width}px (总宽度: {intro_width}px, 边距: {text_margin}px)")
             
-            # 智能换行 - 根据可用宽度计算
+            # 智能换行
             def smart_wrap_text(text, font, max_width):
-                """智能文字换行"""
+                """更智能的文本换行，正确处理中英文"""
                 lines = []
                 current_line = ""
-                
+
                 for char in text:
-                    test_line = current_line + char
-                    text_bbox = draw.textbbox((0, 0), test_line, font=font)
-                    text_width = text_bbox[2] - text_bbox[0]
-                    
-                    if text_width <= max_width:
-                        current_line = test_line
+                    if font.getlength(current_line + char) <= max_width:
+                        current_line += char
                     else:
-                        if current_line:
-                            lines.append(current_line)
-                            current_line = char
-                        else:
-                            lines.append(char)  # 单个字符也太宽的情况
+                        lines.append(current_line)
+                        current_line = char
                 
                 if current_line:
                     lines.append(current_line)
                 
-                return lines
+                # 获取字体高度
+                try:
+                    line_height = font.getbbox("A")[3]
+                except AttributeError:
+                    # 备用方案
+                    line_height = font.getsize("A")[1]
+
+                return lines, line_height
+
+            # 根据计算出的可用宽度进行换行
+            description_lines, line_height = smart_wrap_text(description, font_desc, available_text_width)
             
-            # 使用智能换行
-            lines = smart_wrap_text(description, font_desc, available_text_width)
-            
-            # 计算行高和总高度
-            line_height = font_desc.size + 6  # 行间距稍微小一点
-            total_text_height = len(lines) * line_height - 6  # 最后一行不需要额外间距
+            # 计算文字总高度
+            total_text_height = len(description_lines) * line_height + (len(description_lines) - 1) * line_height
             
             # 垂直居中
             start_y = intro_y + (intro_height - total_text_height) // 2
             
             # 绘制每一行文字
-            for i, line in enumerate(lines):
+            for i, line in enumerate(description_lines):
                 # 计算每行的位置，确保有左右边距
                 line_bbox = draw.textbbox((0, 0), line, font=font_desc)
                 line_width = line_bbox[2] - line_bbox[0]
@@ -690,37 +686,50 @@ class CardGenerator:
     
     async def generate_all_cards(self):
         """生成所有卡牌"""
-        ColorLogger.header("春秋杀卡牌生成器 - 启动")
-        
-        cards_data = self.load_cards_config()
-        
-        if not cards_data:
-            ColorLogger.error("未找到卡牌配置数据")
+        cards_to_generate = self.load_cards_config()
+        if not cards_to_generate:
+            ColorLogger.error("没有要生成的卡牌，程序退出")
             return
+
+        # ================================================================
+        # 设置从第几张卡牌开始生成（基于列表中的顺序，从1开始计数）
+        # 修改此数字以从不同的卡牌开始，并会覆盖已生成的文件
+        start_from_card = 12 
+        # ================================================================
         
-        ColorLogger.progress(f"共找到 {len(cards_data)} 张卡牌需要生成")
+        total_cards = len(cards_to_generate)
+        if start_from_card > total_cards:
+            ColorLogger.error(f"起始卡牌号 ({start_from_card}) 大于总卡牌数 ({total_cards})，程序退出。")
+            return
+
+        ColorLogger.header(f"将从第 {start_from_card} 张卡牌开始覆盖生成，直到第 {total_cards} 张。")
         
-        success_count = 0
+        generated_count = 0
         
-        for i, card_data in enumerate(cards_data, 1):
-            ColorLogger.progress(f"\n=== 进度: {i}/{len(cards_data)} ===")
+        # 使用1-based的索引来方便匹配 start_from_card
+        for i, card_data in enumerate(cards_to_generate, 1):
+            # 如果当前卡牌编号小于指定的起始编号，则跳过
+            if i < start_from_card:
+                continue
+
+            card_name = card_data.get("card_name", f"未知卡牌_{i}")
+            ColorLogger.header(f"正在处理卡牌 {i}/{total_cards}: {card_name}")
+
+            try:
+                await self.generate_single_card(card_data)
+                generated_count += 1
+                ColorLogger.success(f"成功生成或覆盖卡牌: {card_name}")
+            except Exception as e:
+                ColorLogger.error(f"生成卡牌 '{card_name}' 时发生错误: {e}")
+                ColorLogger.warning("将在5秒后继续处理下一张卡牌...")
+                await asyncio.sleep(5)
             
-            result = await self.generate_single_card(card_data)
-            if result:
-                success_count += 1
-            
-            # 添加延迟，避免请求过快
-            if i < len(cards_data):
-                ColorLogger.info("等待5秒后继续...")
-                # 使用进度条显示等待过程
-                wait_time = 5
-                for second in range(wait_time + 1):
-                    ColorLogger.progress_bar(second, wait_time, prefix="等待中...", suffix=f"({second}s/{wait_time}s)")
-                    if second < wait_time:
-                        await asyncio.sleep(1)
-                print()  # 换行
-        
-        ColorLogger.header(f"生成完成！成功生成 {success_count}/{len(cards_data)} 张卡牌")
+            # 计算并显示本次任务的进度
+            cards_to_process_count = total_cards - start_from_card + 1
+            current_card_in_task = i - start_from_card + 1
+            ColorLogger.header(f"本次任务进度: {current_card_in_task}/{cards_to_process_count}")
+
+        ColorLogger.header(f"生成完成！本次任务成功生成/覆盖 {generated_count} 张卡牌")
 
 async def main():
     generator = CardGenerator()
