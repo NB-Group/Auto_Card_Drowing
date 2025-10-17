@@ -3,9 +3,20 @@ import asyncio
 import os
 import time
 import requests
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageChops
+import random
+import math
 from playwright.async_api import async_playwright
+try:
+    import torch  # type: ignore
+    from modelscope import DiffusionPipeline  # type: ignore
+    HAS_MODELSCOPE = True
+except Exception as e:
+    HAS_MODELSCOPE = False
+    # 调试：打印导入失败的具体原因
+    print(f"[DEBUG] Failed to import torch/diffusers. HAS_MODELSCOPE set to False. Error: {e}")
 from urllib.parse import urlparse
+import traceback
 import tempfile
 
 class ColorLogger:
@@ -122,6 +133,73 @@ class CardGenerator:
         except Exception as e:
             ColorLogger.error(f"读取配置文件失败: {e}")
             return []
+
+    def load_historical_characters(self):
+        """读取历史人物数据"""
+        config_path = os.path.join(self.base_path, "historical_characters.json")
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                characters_data = json.load(f)
+                ColorLogger.success(f"成功加载历史人物数据")
+                return characters_data
+        except Exception as e:
+            ColorLogger.error(f"读取历史人物数据失败: {e}")
+            return []
+
+    def generate_historical_card_data(self, character_data, country_name):
+        """生成历史人物卡牌数据"""
+        name = character_data['name']
+        skill_name = character_data['skill_name']
+        game_skill = character_data['game_skill']
+        description = character_data['description']
+        historical_source = character_data['historical_source']
+
+        # 生成AI提示词（要求AI写字迹）
+        ai_prompt = (
+            f"水性马克笔手绘，稚嫩童趣的中国古风，低饱和复古配色。"
+            f"一个战国时期的人物：{country_name}的{name}。"
+            f"{'身穿黑色衣袍，' if country_name == '秦国' else ''}"
+            f"头肩胸像，服饰考据，构图居中且偏下，人物和文字都往下移动，"
+            f"确保文字完全在画面内，不超出任何边框。"
+            f"背景简洁，米黄色纸张质感。"
+            f"必须使用简体中文，更偏手写感的中文文字：字形略不规则、略有倾斜与连笔，"
+            f"但整体工整可读，笔画偏粗，具有马克笔渗化与深浅不均的笔触效果；"
+            f"与纸面自然融合，无水印无Logo。"
+            f"画面上只有人物名称和技能名称，没有其他文字。"
+            f"文字位置控制：所有文字必须在画面中央偏下区域，字体要适中，"
+            f"上下留出充足边距，确保文字完全在安全区域内，不超出任何边框。"
+            f"排版要求：人物头像和文字整体向下移动，顶部留白充足。"
+            f"顶部大标题「{name}」（字体大小适中），"
+            f"右侧竖排小标题：『{skill_name}』。"
+        )
+
+        # 卡牌数据结构
+        card_data = {
+            'card_group': '历史人物卡',
+            'card_name': f"{country_name}-{name}",
+            'color_theme': self.get_country_color_theme(country_name),
+            'ai_prompt': ai_prompt,
+            'description': f"{skill_name}\n{game_skill}\n{historical_source}",
+            'price': '25历史币',
+            'country': country_name,
+            'character_name': name,
+            'ai_writes_text': True  # AI生成字迹
+        }
+
+        return card_data
+
+    def get_country_color_theme(self, country_name):
+        """根据国家名称获取对应的颜色主题"""
+        color_themes = {
+            '韩国': '橙金',
+            '赵国': '紫金',
+            '魏国': '绿金',
+            '楚国': '深红金',
+            '燕国': '银黑',
+            '齐国': '蓝金',
+            '秦国': '黑金'
+        }
+        return color_themes.get(country_name, '墨青金属银')
     
     async def save_cookies(self, context):
         """保存cookies"""
@@ -145,10 +223,322 @@ class CardGenerator:
             ColorLogger.error(f"加载Cookies失败: {e}")
         return False
     
-    async def generate_ai_image(self, prompt):
-        """使用Playwright生成AI图片"""
-        # 添加总体提示词前缀
-        base_prompt = "写实融合国风插画风格（参考《清明上河图》的精致线条感与《鬼谷八荒》的色彩层次）。整体色调偏复古，低饱和度，背景带有米黄羊皮纸质感。图片长宽比注意只能是1比1。生成字时请使用标准正楷字。"
+    async def generate_ai_image_with_reference(self, prompt, reference_image_path):
+        """使用参考图片生成AI图片（将图片路径文本直接输入，不弹文件选择器）"""
+        ColorLogger.generating("正在生成AI图片（参考图片风格）...")
+        ColorLogger.info(f"提示词: {prompt}")
+        ColorLogger.info(f"参考图片: {reference_image_path}")
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch_persistent_context(
+                user_data_dir=self.user_data_path,
+                headless=False,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor'
+                ]
+            )
+
+            try:
+                page = browser.pages[0] if len(browser.pages) else await browser.new_page()
+
+                current_url = page.url
+                if 'copilot.microsoft.com' not in current_url:
+                    ColorLogger.info("导航到Copilot网站...")
+                    await page.goto("https://copilot.microsoft.com", timeout=60000)
+                    await page.wait_for_timeout(3000)
+
+                # 登录检测（非阻塞）
+                try:
+                    login_button = await page.query_selector('button[data-testid="sign-in-button"]')
+                    if login_button:
+                        ColorLogger.warning("检测到未登录状态，请在浏览器中登录后继续...")
+                except:
+                    pass
+
+                await page.wait_for_timeout(2000)
+
+                # 输入框
+                input_selector = 'textarea[data-testid="composer-input"]'
+                try:
+                    await page.wait_for_selector(input_selector, timeout=30000)
+                except:
+                    alternatives = [
+                        'textarea[placeholder*="消息"]',
+                        'textarea[placeholder*="Message"]',
+                        'textarea#userInput',
+                        'textarea[role="textbox"]'
+                    ]
+                    for sel in alternatives:
+                        try:
+                            await page.wait_for_selector(sel, timeout=5000)
+                            input_selector = sel
+                            break
+                        except:
+                            continue
+                    else:
+                        ColorLogger.error("未找到输入框，请检查页面状态")
+                        return None
+
+                # 先点击“+”按钮打开附件菜单 — 使用一组备选选择器以提高兼容性
+                try:
+                    plus_selectors = [
+                        'button[data-testid="plus-button"]',
+                        'button[aria-label*="添加"]',
+                        'button[title*="添加"]',
+                        'button:has(svg[mask*="plus"])',
+                        'div[role="button"][data-testid="plus-button"]',
+                        # 匹配用户提供的自定义片段 — 查找包含 paperclip 图标或相关 mask-image 的容器
+                        'div[style*="paperclip-CMVChwA7.svg"]',
+                        'div[style*="/static/cmc/assets/paperclip-CMVChwA7.svg"]',
+                        'div[class*="paperclip"]',
+                        'div[role="button"][class*="add"]',
+                    ]
+
+                    plus_btn = None
+                    for sel in plus_selectors:
+                        try:
+                            plus_btn = await page.wait_for_selector(sel, timeout=2000)
+                            if plus_btn:
+                                ColorLogger.info(f"找到加号按钮选择器: {sel}")
+                                await plus_btn.click()
+                                break
+                        except Exception:
+                            continue
+
+                    if not plus_btn:
+                        ColorLogger.warning("未能找到或点击加号按钮（尝试了多种选择器）")
+                except Exception as e:
+                    ColorLogger.warning(f"点击加号按钮时发生异常: {e}")
+
+                # 点击“上传”按钮，弹出文件选择器并选择图片
+                try:
+                    # 上传按钮也使用多候选选择器
+                    upload_selectors = [
+                        'button[data-testid="file-upload-button"]',
+                        'input[type="file"]',
+                        'button[aria-label*="上传"]',
+                        'button[title*="上传"]',
+                        'div[role="button"] input[type="file"]',
+                        'div[style*="paperclip-CMVChwA7.svg"] input[type="file"]',
+                    ]
+
+                    upload_btn = None
+                    file_chooser = None
+                    for sel in upload_selectors:
+                        try:
+                            # 如果是直接的 input[type=file]，直接设置 files
+                            if sel == 'input[type="file"]' or sel.endswith('input[type="file"]'):
+                                input_el = await page.query_selector(sel)
+                                if input_el:
+                                    abs_path = os.path.abspath(reference_image_path)
+                                    await input_el.set_input_files(abs_path)
+                                    upload_done = True
+                                    ColorLogger.success("已通过 input[type=file] 上传参考图片")
+                                    break
+                            # 其它情况尝试通过点击触发文件选择器
+                            upload_btn = await page.wait_for_selector(sel, timeout=2000)
+                            if upload_btn:
+                                async with page.expect_file_chooser() as fc_info:
+                                    await upload_btn.click()
+                                file_chooser = await fc_info.value
+                                abs_path = os.path.abspath(reference_image_path)
+                                await file_chooser.set_files(abs_path)
+                                ColorLogger.success("已通过菜单上传参考图片")
+                                break
+                        except Exception:
+                            continue
+
+                    if not upload_btn and not file_chooser:
+                        ColorLogger.warning("未能找到上传控件，上传操作可能失败")
+                    # 等待上传完成：先检查上传中的SVG动画，待其消失；或检测到本地blob缩略图
+                    await page.wait_for_timeout(500)
+                    upload_done = False
+                    # 1) 若出现上传动画SVG（典型的 lottie 进度圈），等其消失
+                    try:
+                        # 先尝试检测动画出现
+                        await page.wait_for_selector('svg[viewBox="0 0 800 800"]', timeout=2000)
+                        # 再等待动画消失（上传完成）
+                        await page.wait_for_selector('svg[viewBox="0 0 800 800"]', state='detached', timeout=20000)
+                        upload_done = True
+                    except:
+                        pass
+                    # 2) 或者识别到已附加的blob缩略图
+                    if not upload_done:
+                        for sel in ['img[src^="blob:"]', 'div [src^="blob:"]', 'div[role="img"][style*="blob:"]']:
+                            try:
+                                await page.wait_for_selector(sel, timeout=4000)
+                                upload_done = True
+                                break
+                            except:
+                                continue
+                    # 3) 兜底再等一会
+                    if not upload_done:
+                        await page.wait_for_timeout(1500)
+                except Exception as e:
+                    ColorLogger.warning(f"通过菜单上传失败: {e}")
+
+                # 清空并输入提示词（不再加入@文件名，由上传图片承担风格参考）
+                await page.fill(input_selector, "")
+                base_text = "请模仿刚上传图片的风格，使用长方形（3:4）构图。"
+                # 用fill一次性填入，避免\n触发即时发送
+                await page.fill(input_selector, base_text + " " + prompt)
+
+                # 发送
+                await page.keyboard.press('Enter')
+
+                # 等待生成
+                ColorLogger.progress("等待AI开始生成...")
+                try:
+                    await page.wait_for_selector('button[data-testid="stop-button"]', timeout=10000)
+                    ColorLogger.generating("检测到AI正在生成中...")
+                except:
+                    ColorLogger.info("未检测到生成指示器，继续等待...")
+
+                max_wait_time = 1000
+                wait_interval = 2
+                waited_time = 0
+                ColorLogger.progress_bar(0, max_wait_time, prefix="生成中...", suffix=f"(0s/{max_wait_time}s)")
+                while waited_time < max_wait_time:
+                    try:
+                        indicator = await page.query_selector('button[data-testid="stop-button"]')
+                        if not indicator:
+                            ColorLogger.progress_bar(waited_time, max_wait_time, prefix="生成完成", suffix=f"({waited_time}s/{max_wait_time}s)")
+                            print()
+                            ColorLogger.success("AI生成完成！")
+                            break
+                    except:
+                        pass
+                    await page.wait_for_timeout(wait_interval * 1000)
+                    waited_time += wait_interval
+                    ColorLogger.progress_bar(waited_time, max_wait_time, prefix="生成中...", suffix=f"({waited_time}s/{max_wait_time}s)")
+
+                if waited_time >= max_wait_time:
+                    print()
+                    ColorLogger.warning("等待超时，但继续尝试查找图片...")
+
+                await page.wait_for_timeout(3000)
+
+                img_selectors = [
+                    'div.w-full.max-w-96.rounded-2xl img',
+                    'img[alt*="生成"]',
+                    'img[alt*="Generated"]',
+                    'div.rounded-2xl img',
+                    'div[class*="aspect-auto"] img'
+                ]
+                img_element = None
+                for sel in img_selectors:
+                    try:
+                        await page.wait_for_selector(sel, timeout=10000)
+                        imgs = await page.query_selector_all(sel)
+                        if imgs:
+                            img_element = imgs[-1]
+                            break
+                    except:
+                        continue
+                if img_element:
+                    img_url = await img_element.get_attribute('src')
+                    if img_url:
+                        ColorLogger.success("找到图片URL！")
+                        return await self.download_image(img_url)
+                    else:
+                        ColorLogger.error("未找到图片URL")
+                        return None
+                else:
+                    ColorLogger.error("未找到生成的图片")
+                    return None
+            except Exception as e:
+                ColorLogger.error(f"生成图片时发生错误: {e}")
+                return None
+            finally:
+                pass
+    
+    async def generate_ai_image(self, prompt, style="classic", reference_image_path=None, backend: str = "copilot", aspect_ratio: str = "3:4"):
+        """使用Playwright生成AI图片
+
+        Args:
+            prompt: 原始提示词
+            style: 生成风格，"classic"为传统风格，"hand_drawn"为手绘风格
+            reference_image_path: 参考图片路径（若提供则使用@图片并上传模仿风格）
+            backend: 生成后端，"copilot" 或 "modelscope"
+            aspect_ratio: 生成比例，示例："3:4"、"1:1" 等
+        """
+        # 使用ModelScope本地/显卡生成
+        if backend == "modelscope":
+            try:
+                if not HAS_MODELSCOPE:
+                    raise RuntimeError("未安装modelscope/torch，请改用copilot或安装依赖")
+
+                # 缓存目录设在当前目录
+                os.environ.setdefault("MODELSCOPE_CACHE", os.path.abspath("./"))
+
+                # 设备与精度
+                if torch.cuda.is_available():
+                    torch_dtype = torch.bfloat16
+                    device = "cuda"
+                else:
+                    torch_dtype = torch.float32
+                    device = "cpu"
+
+                # 分辨率映射 (使用Qwen-Image推荐值)
+                ar = {
+                    "1:1": (1328, 1328),
+                    "16:9": (1664, 928),
+                    "9:16": (928, 1664),
+                    "4:3": (1472, 1140),
+                    "3:4": (1140, 1472),
+                    "3:2": (1584, 1056),
+                    "2:3": (1056, 1584),
+                }
+                width, height = ar.get(aspect_ratio, (1140, 1472))
+
+                # 加稳定画质魔法词
+                positive_magic = {"en": ", Ultra HD, 4K, cinematic composition.", "zh": ", 超清，4K，电影级构图."}
+                # 如果是中文提示就拼接中文后缀
+                suffix = positive_magic["zh"] if any(ch > '\u007f' for ch in prompt) else positive_magic["en"]
+
+                model_name = "Qwen/Qwen-Image"
+                pipe = DiffusionPipeline.from_pretrained(model_name, torch_dtype=torch_dtype, cache_dir=os.path.abspath("./"))
+                pipe = pipe.to(device)
+                
+                image = pipe(
+                    prompt=prompt + suffix,
+                    negative_prompt="",
+                    width=width,
+                    height=height,
+                    num_inference_steps=50,
+                    true_cfg_scale=4.0,
+                    generator=torch.Generator(device=device) # 使用动态随机种子
+                ).images[0]
+
+                # 保存到临时文件
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+                    image.save(temp_file.name)
+                    return temp_file.name
+            except Exception as e:
+                tb = traceback.format_exc()
+                ColorLogger.error(f"ModelScope生成失败: {e}\n{tb}")
+                return None
+
+        # Copilot 后端
+        # 若指定参考图片，则走参考图片流程
+        if reference_image_path and os.path.exists(reference_image_path):
+            return await self.generate_ai_image_with_reference(prompt, reference_image_path)
+        # 统一的、稳定的“无文字”手绘风格提示词
+        if style == "hand_drawn":
+            base_prompt = (
+                "中国古风手绘插画，纸本蜡彩+彩铅质感，低饱和复古配色，米黄色羊皮纸背景。"
+                "线条略抖动、边缘略糙、阴影轻微颗粒化。画面简洁、人物主体明确，背景留白充足。"
+                "严格禁止任何文字、印章、题字、签名、数字、标识。"
+                "长方形构图（3:4），头肩胸像为主，构图居中。"
+            )
+        else:
+            base_prompt = (
+                "国风插画，低饱和复古色调，米黄色羊皮纸背景，画面干净。"
+                "严格禁止任何文字。长方形构图（3:4）。"
+            )
+
         full_prompt = base_prompt + " " + prompt
         
         ColorLogger.generating(f"正在生成AI图片...")
@@ -220,7 +610,8 @@ class CardGenerator:
                         return None
                   # 清空输入框并输入新提示词
                 await page.fill(input_selector, "")
-                await page.type(input_selector, full_prompt, delay=50)
+                # 避免逐字键入导致回车发送：一次性填入
+                await page.fill(input_selector, full_prompt)
                 
                 # 发送消息
                 await page.keyboard.press('Enter')
@@ -228,23 +619,24 @@ class CardGenerator:
                 # 等待生成开始 - 检查是否有生成指示器
                 ColorLogger.progress("等待AI开始生成...")
                 try:
-                    await page.wait_for_selector('.size-3\\.5.rounded.bg-salmon-550', timeout=10000)
+                    # 更新后的按钮选择器
+                    await page.wait_for_selector('button[data-testid="stop-button"]', timeout=10000)
                     ColorLogger.generating("检测到AI正在生成中...")
                 except:
                     ColorLogger.info("未检测到生成指示器，继续等待...")
-                
+
                 # 等待生成完成 - 生成指示器消失
                 max_wait_time = 1000  # 最多等待2分钟
                 wait_interval = 2
                 waited_time = 0
-                
+
                 # 显示初始进度条
                 ColorLogger.progress_bar(0, max_wait_time, prefix="生成中...", suffix=f"(0s/{max_wait_time}s)")
-                
+
                 while waited_time < max_wait_time:
                     try:
-                        # 检查是否还在生成
-                        generating_indicator = await page.query_selector('.size-3\\.5.rounded.bg-salmon-550')
+                        # 检查是否还在生成 - 使用新的选择器
+                        generating_indicator = await page.query_selector('button[data-testid="stop-button"]')
                         if not generating_indicator:
                             ColorLogger.progress_bar(waited_time, max_wait_time, prefix="生成完成", suffix=f"({waited_time}s/{max_wait_time}s)")
                             print()  # 换行
@@ -331,16 +723,44 @@ class CardGenerator:
         except Exception as e:
             ColorLogger.error(f"下载图片失败: {e}")
             return None
-    def compose_card(self, card_data, ai_image_path):
-        """合成最终卡牌（优化布局与融合效果）"""
+    def compose_card(self, card_data, ai_image_path, no_border=False):
+        """合成最终卡牌（优化布局与融合效果）
+
+        Args:
+            card_data: 卡牌数据
+            ai_image_path: AI图片路径
+            no_border: 是否去除边框
+        """
         try:
             ColorLogger.compose("开始合成卡牌...")
             
+            card_group = card_data.get('card_group', '基础卡')
+            card_name = card_data.get('card_name', '未命名卡牌')
+            description = card_data.get('description', '')
+            price = card_data.get('price', '')
+
+            # 根据卡牌组别选择背景
+            if card_group == "历史人物卡":
+                # 历史人物卡直接使用AI生成的图（AI已经写了字，不需要额外绘制）
+                return Image.open(ai_image_path).convert("RGBA")
+                
+            # 创建一张新卡牌
+            card = Image.new("RGBA", (self.CARD_WIDTH, self.CARD_HEIGHT), (255, 255, 255, 0))
+            draw = ImageDraw.Draw(card)
+
             # 加载基础图片
-            background = Image.open(os.path.join(self.base_img_path, "background.png"))
+            if no_border:
+                # 去除边框模式：创建一个长方形纯色背景（3:4比例）
+                # 参考用户图片，卡牌宽度大约是高度的3/4
+                card_width = 600  # 宽度
+                card_height = 800  # 高度 (4/3 比例)
+                background = Image.new('RGBA', (card_width, card_height), (139, 69, 19, 255))  # 棕色背景
+            else:
+                background = Image.open(os.path.join(self.base_img_path, "background.png"))
+
             title = Image.open(os.path.join(self.base_img_path, "title.png"))
             introduce = Image.open(os.path.join(self.base_img_path, "introduce.png"))
-            
+
             # 加载AI生成的图片
             if ai_image_path and os.path.exists(ai_image_path):
                 ai_image = Image.open(ai_image_path)
@@ -377,12 +797,13 @@ class CardGenerator:
                 final_card.paste(title, (title_x, title_y))
 
             ColorLogger.compose("处理AI图片尺寸...")
-            
+
             # AI图片处理：进一步缩小尺寸，避免图片过大
             original_width, original_height = ai_image.size
-            
+
             # 计算合适的尺寸：适应卡牌宽度，左侧收窄3px
-            available_width = bg_width - 85  # 左边距44px，右边距41px
+            # 对于长方形卡牌（600x800），调整可用宽度
+            available_width = bg_width - 60  # 调整边距以适应长方形构图
             
             if original_width > available_width:
                 # 需要缩放以适应宽度
@@ -409,7 +830,7 @@ class CardGenerator:
             ai_y = title_y + title_height + 20
             # 注意：AI图片不在这里直接粘贴，而是通过下面的渐变融合方式
 
-            # introduce粘贴
+            # introduce区域：使用底栏形状作为文本背景（若AI已写字，本区域仅做装饰）
             intro_x = (bg_width - intro_width) // 2
             intro_y = bg_height - intro_height - 20
             if introduce.mode == 'RGBA':
@@ -465,44 +886,30 @@ class CardGenerator:
             
             # --- 文字 ---
             draw = ImageDraw.Draw(final_card)
-            # 字体更大
-            try:
-                font_title = ImageFont.truetype("simhei.ttf", 44)
-                font_desc = ImageFont.truetype("simhei.ttf", 24)  # 稍微小一点，为了更好布局
-                # 尝试加载支持emoji的字体
-                try:
-                    font_emoji = ImageFont.truetype("seguiemj.ttf", 40)  # Windows emoji字体
-                except:
+            # 加载手写风格字体（回退链）
+            def load_font_chain(names, size):
+                for name in names:
                     try:
-                        font_emoji = ImageFont.truetype("NotoColorEmoji.ttf", 40)  # Linux emoji字体
+                        return ImageFont.truetype(name, size)
                     except:
-                        font_emoji = font_title  # 回退到标题字体
-            except:
-                try:
-                    font_title = ImageFont.truetype("arial.ttf", 44)
-                    font_desc = ImageFont.truetype("arial.ttf", 24)
-                    font_emoji = font_title
-                except:
-                    font_title = ImageFont.load_default()
-                    font_desc = ImageFont.load_default()
-                    font_emoji = font_title
+                        continue
+                return ImageFont.load_default()
 
-            # 卡牌类型emoji映射
-            card_type_emojis = {
-                "国家卡": "🏰",
-                "思想卡": "🧠", 
-                "变法卡": "⚖️",
-                "连锁卡": "🔗",
-                "军事卡": "⚔️",
-                "经济卡": "💰",
-                "道具卡": "🎁",
-                "锦囊牌": "📜",
-                "祭祀卡": "🙏"
-            }
-            
-            # 获取卡牌类型和对应emoji
-            card_group = card_data.get('card_group', '')
-            emoji = card_type_emojis.get(card_group, '')
+            # 适配手写中文字体优先级（可自行将对应ttf放入项目根目录）
+            handwriting_candidates = [
+                "HanYiZhuYuan.ttf",      # 示例：手写体（需自备）
+                "ZCOOLKuaiLe-Regular.ttf",
+                "LXGWWenKai-Regular.ttf",
+                "simhei.ttf",
+                "msyh.ttc",
+                "arial.ttf"
+            ]
+
+            font_title = load_font_chain(handwriting_candidates, 60)
+            font_desc = load_font_chain(handwriting_candidates, 28)
+
+            # 统一：不再使用emoji
+            emoji = ''
             
             # 根据卡牌主题色确定emoji颜色（使用更和谐的颜色）
             color_theme = card_data.get('color_theme', '')
@@ -546,9 +953,29 @@ class CardGenerator:
             # 文字完全居中
             name_x = title_content_center_x - name_width // 2
             name_y = title_content_center_y - name_height // 2
-            
-            # 绘制卡牌名称（先绘制文字）
-            draw.text((name_x, name_y), card_name, fill='white', font=font_title)
+
+            # 渲染手写质感：对文字做微小抖动、多层叠加，并加轻微高斯模糊与噪点
+            def render_handwriting_text(base_img, text, position, font, fill=(240, 230, 210)):
+                temp = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+                tdraw = ImageDraw.Draw(temp)
+                x, y = position
+                # 叠加几层轻微偏移
+                for i in range(4):
+                    dx = random.randint(-1, 1)
+                    dy = random.randint(-1, 1)
+                    tdraw.text((x + dx, y + dy), text, fill=fill, font=font)
+                # 轻微模糊
+                blurred = temp.filter(ImageFilter.GaussianBlur(radius=0.35))
+                # 叠加少量噪点（以乘法方式压到背景）
+                noise = Image.effect_noise(base_img.size, 5).convert('L')
+                noise = ImageOps.colorize(noise, (0, 0, 0), (255, 255, 255)).convert('RGBA')
+                noise.putalpha(20)
+                base_img.alpha_composite(blurred)
+                base_img.alpha_composite(noise)
+
+            # 如果AI负责写字，则不额外叠加标题；否则用手写渲染绘制
+            if not card_data.get('ai_writes_text'):
+                render_handwriting_text(final_card, card_name, (name_x, name_y), font_title, fill=(245, 235, 215))
             
             # 如果有emoji，在文字右边绘制
             if emoji:
@@ -577,9 +1004,9 @@ class CardGenerator:
             
             # --- 优化底栏描述文字布局 ---
             description = card_data.get('description', '')
-            
-            # 计算可用区域（大幅增加左右边距）
-            text_margin = 35  # 大幅增加左右边距到35px
+
+            # 计算可用区域（为长方形构图调整边距）
+            text_margin = 25  # 调整边距以适应长方形构图
             available_text_width = intro_width - (text_margin * 2)
             
             ColorLogger.compose(f"底栏可用宽度: {available_text_width}px (总宽度: {intro_width}px, 边距: {text_margin}px)")
@@ -618,67 +1045,118 @@ class CardGenerator:
             # 垂直居中
             start_y = intro_y + (intro_height - total_text_height) // 2
             
-            # 绘制每一行文字
-            for i, line in enumerate(description_lines):
-                # 计算每行的位置，确保有左右边距
-                line_bbox = draw.textbbox((0, 0), line, font=font_desc)
-                line_width = line_bbox[2] - line_bbox[0]
-                
-                # 在有边距的区域内居中
-                available_x_start = intro_x + text_margin
-                available_x_width = intro_width - (text_margin * 2)
-                line_x = available_x_start + (available_x_width - line_width) // 2
-                
-                ColorLogger.compose(f"第{i+1}行文字位置: x={line_x}, 宽度={line_width}, 边距区域={available_x_start}-{available_x_start + available_x_width}")
-                
-                # 确保不超出边界（双重保护）
-                if line_x < intro_x + text_margin:
-                    line_x = intro_x + text_margin
-                    ColorLogger.warning(f"第{i+1}行文字超出左边界，调整到: {line_x}")
-                elif line_x + line_width > intro_x + intro_width - text_margin:
-                    line_x = intro_x + intro_width - text_margin - line_width
-                    ColorLogger.warning(f"第{i+1}行文字超出右边界，调整到: {line_x}")
-                
-                line_y = start_y + i * line_height
-                draw.text((line_x, line_y), line, fill='white', font=font_desc)
+            # 如果AI负责写字，底栏不再覆盖文本；否则渲染手写说明
+            if not card_data.get('ai_writes_text'):
+                for i, line in enumerate(description_lines):
+                    line_bbox = draw.textbbox((0, 0), line, font=font_desc)
+                    line_width = line_bbox[2] - line_bbox[0]
+
+                    available_x_start = intro_x + text_margin
+                    available_x_width = intro_width - (text_margin * 2)
+                    line_x = available_x_start + (available_x_width - line_width) // 2
+
+                    if line_x < intro_x + text_margin:
+                        line_x = intro_x + text_margin
+                    elif line_x + line_width > intro_x + intro_width - text_margin:
+                        line_x = intro_x + intro_width - text_margin - line_width
+
+                    line_y = start_y + i * line_height
+                    render_handwriting_text(final_card, line, (line_x, line_y), font_desc, fill=(240, 230, 210))
             
             ColorLogger.success("卡牌合成完成！")
             return final_card
         except Exception as e:
             ColorLogger.error(f"合成卡牌失败: {e}")
             return None
+
+    def save_full_ai_card(self, ai_image_path, output_path):
+        """不做模板合成，直接使用AI整张牌。
+
+        - 统一为3:4比例（600x800）
+        - 仅做轻度滤镜，保证观感一致
+        - 保持AI生成的完整布局，不进行裁切
+        """
+        try:
+            img = Image.open(ai_image_path).convert('RGBA')
+            target_size = (600, 800)
+
+            # 获取原图尺寸
+            original_width, original_height = img.size
+
+            # 计算缩放比例，保持宽高比
+            target_width, target_height = target_size
+            scale = min(target_width / original_width, target_height / original_height)
+
+            # 计算新的尺寸
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+
+            # 缩放图片
+            resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # 创建白色背景
+            background = Image.new('RGBA', target_size, (255, 255, 255, 255))
+
+            # 居中粘贴（不裁切）
+            paste_x = (target_width - new_width) // 2
+            paste_y = (target_height - new_height) // 2
+            background.paste(resized, (paste_x, paste_y), resized)
+
+            # 极轻模糊，贴合纸面质感
+            final_img = background.filter(ImageFilter.GaussianBlur(radius=0.2))
+            final_img.save(output_path, 'PNG')
+            return True
+        except Exception as e:
+            ColorLogger.error(f"保存整张AI卡牌失败: {e}")
+            return False
     
-    async def generate_single_card(self, card_data):
-        """生成单张卡牌"""
+    async def generate_single_card(self, card_data, style="classic", no_border=False, reference_image_path=None, ai_full_card=False, backend: str = "copilot", aspect_ratio: str = "3:4"):
+        """生成单张卡牌
+
+        Args:
+            card_data: 卡牌数据
+            style: 生成风格，"classic"为传统风格，"hand_drawn"为手绘风格
+            no_border: 是否去除边框
+        """
         card_name = card_data.get('card_name', 'unknown')
         ai_prompt = card_data.get('ai_prompt', '')
-        
-        ColorLogger.header(f"开始生成卡牌: {card_name}")
-        
+
+        ColorLogger.header(f"开始生成卡牌: {card_name} (风格: {style})")
+
         # 生成AI图片
-        ai_image_path = await self.generate_ai_image(ai_prompt)
+        ai_image_path = await self.generate_ai_image(ai_prompt, style, reference_image_path, backend=backend, aspect_ratio=aspect_ratio)
         
         if ai_image_path:
-            # 合成最终卡牌
-            final_card = self.compose_card(card_data, ai_image_path)
-            
-            if final_card:
-                # 保存卡牌
-                output_filename = f"{card_name}.png"
-                output_path = os.path.join(self.output_path, output_filename)
-                final_card.save(output_path, 'PNG')
-                ColorLogger.success(f"卡牌生成完成: {output_path}")
-                
-                # 清理临时文件
-                try:
-                    os.unlink(ai_image_path)
-                    ColorLogger.info("临时文件已清理")
-                except:
-                    pass
-                
-                return output_path
+            output_filename = f"{card_name}.png"
+            output_path = os.path.join(self.output_path, output_filename)
+
+            if ai_full_card or card_data.get('ai_writes_text'):
+                # 直接保存AI整张牌
+                success = self.save_full_ai_card(ai_image_path, output_path)
+                if success:
+                    ColorLogger.success(f"卡牌生成完成(整张AI): {output_path}")
+                    try:
+                        os.unlink(ai_image_path)
+                        ColorLogger.info("临时文件已清理")
+                    except:
+                        pass
+                    return output_path
+                else:
+                    ColorLogger.error(f"卡牌 {card_name} 保存失败")
             else:
-                ColorLogger.error(f"卡牌 {card_name} 合成失败")
+                # 模板合成
+                final_card = self.compose_card(card_data, ai_image_path, no_border=no_border)
+                if final_card:
+                    final_card.save(output_path, 'PNG')
+                    ColorLogger.success(f"卡牌生成完成: {output_path}")
+                    try:
+                        os.unlink(ai_image_path)
+                        ColorLogger.info("临时文件已清理")
+                    except:
+                        pass
+                    return output_path
+                else:
+                    ColorLogger.error(f"卡牌 {card_name} 合成失败")
         else:
             ColorLogger.error(f"卡牌 {card_name} AI图片生成失败")
         
@@ -731,9 +1209,84 @@ class CardGenerator:
 
         ColorLogger.header(f"生成完成！本次任务成功生成/覆盖 {generated_count} 张卡牌")
 
+    async def generate_historical_cards(self, countries=None, style="hand_drawn", no_border=True, reference_image_path=None, ai_full_card=False, backend: str = "copilot", aspect_ratio: str = "3:4"):
+        """生成历史人物卡牌
+
+        Args:
+            countries: 要生成的国家列表，如果为None则生成所有国家
+            style: 生成风格，"classic"为传统风格，"hand_drawn"为手绘风格
+            no_border: 是否去除边框
+        """
+        historical_data = self.load_historical_characters()
+        if not historical_data:
+            ColorLogger.error("历史人物数据加载失败")
+            return
+
+        # 如果没有指定国家，则生成所有国家
+        if countries is None:
+            countries = [country['country'] for country in historical_data]
+
+        total_cards = 0
+        generated_count = 0
+
+        for country_data in historical_data:
+            country_name = country_data['country']
+            if country_name not in countries:
+                continue
+
+            ColorLogger.header(f"开始生成 {country_name} 历史人物卡牌")
+
+            for character_data in country_data['characters']:
+                # 生成卡牌数据
+                card_data = self.generate_historical_card_data(character_data, country_name)
+
+                try:
+                    await self.generate_single_card(card_data, style=style, no_border=no_border, reference_image_path=reference_image_path, ai_full_card=ai_full_card, backend=backend, aspect_ratio=aspect_ratio)
+                    generated_count += 1
+                    ColorLogger.success(f"成功生成历史人物卡牌: {card_data['card_name']}")
+                except Exception as e:
+                    ColorLogger.error(f"生成历史人物卡牌 '{card_data['card_name']}' 时发生错误: {e}")
+                    ColorLogger.warning("将在2秒后继续处理下一张卡牌...")
+                    await asyncio.sleep(2)
+
+                total_cards += 1
+
+        ColorLogger.header(f"历史人物卡牌生成完成！成功生成 {generated_count}/{total_cards} 张卡牌")
+
 async def main():
+    """主函数：支持多种生成模式"""
+    import sys
+
     generator = CardGenerator()
-    await generator.generate_all_cards()
+
+    # 检查命令行参数
+    if len(sys.argv) > 1:
+        mode = sys.argv[1]
+        if mode == "historical":
+            # 生成历史人物卡牌
+            countries_arg = sys.argv[2] if len(sys.argv) > 2 else None
+            countries = countries_arg.split(',') if countries_arg else None
+            style = sys.argv[3] if len(sys.argv) > 3 else "hand_drawn"
+            no_border = sys.argv[4].lower() == "true" if len(sys.argv) > 4 else True
+            reference_image = sys.argv[5] if len(sys.argv) > 5 else "微信图片_20250928182802_712_476.jpg"
+            ai_full_card = (sys.argv[6].lower() == "true") if len(sys.argv) > 6 else True
+
+            print(f"生成模式: 历史人物卡牌")
+            print(f"国家列表: {countries or '所有国家'}")
+            print(f"生成风格: {style}")
+            print(f"去除边框: {no_border}")
+
+            await generator.generate_historical_cards(countries=countries, style=style, no_border=no_border, reference_image_path=reference_image, ai_full_card=ai_full_card)
+        elif mode == "classic":
+            # 传统卡牌生成模式
+            await generator.generate_all_cards()
+        else:
+            print("未知的生成模式，支持的模式: historical, classic")
+            return
+    else:
+        # 默认生成传统卡牌
+        print("未指定生成模式，默认生成传统卡牌...")
+        await generator.generate_all_cards()
 
 if __name__ == "__main__":
     asyncio.run(main())
